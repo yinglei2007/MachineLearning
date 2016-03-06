@@ -1,0 +1,125 @@
+---
+title: "MachineLearning Project"
+author: "Lei Ying"
+date: "March 5, 2016"
+output: html_document
+---
+# Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+# Get and Clean Data
+## Download data
+```{r}
+library(caret)
+library(dplyr)
+library(curl)
+
+set.seed(3223)
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="pmlTraining.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="pmlTesting.csv")
+
+training <- read.csv("pmlTraining.csv", header=TRUE, na.strings=c("NA", " "))
+dim(training)
+testing <- read.csv("pmlTesting.csv", header=TRUE, na.strings=c("NA", " "))
+```
+
+## Clean data
+traning data set is 19622 X 160 data frame. Some columns contain many NA and missing value. These columns must be removed before modeling. 
+
+```{r}
+# remove column 1 to 7
+training <- subset(training, select=-c(1:7))
+testing <- subset(testing, select=-c(1:7))
+
+# Identify and select columns with no NA or missing value
+training_fill <- training[, (colSums(is.na(training)) == 0)]
+testing_fill <- testing[, (colSums(is.na(testing)) == 0)]
+name_testing_fill <- colnames(testing_fill[, 1:52])
+
+training_fill <- training[, c(name_testing_fill, "classe")]
+
+```
+
+## Split training data set into training data set (70%) to establish model and validation data set (30%) for cross validation.
+
+```{r}
+train <- createDataPartition(y=training_fill$classe, p=0.7, list=FALSE)
+TrainSet <- training_fill[train,]
+TestSet <- training_fill[-train,]
+dim(TrainSet)
+
+```
+## Now, the TrainSet contains 86 variables, the 86th column is "classe" variable. First we need to tease out variables highly correlated. 
+
+```{r}
+library(corrplot)
+corr <- cor(TrainSet[, 1:52])
+corrplot(corr, order="FPC", method="color", type="lower")
+```
+
+From this plot, we can see there are several variables highly correlated. These variables should be removed before establish prediction model.
+This time we set up a cutoff of 0.95 of correlation.
+
+```{r}
+corr_value <- abs(cor(TrainSet[, -dim(TrainSet)[2]]))
+diag(corr_value) <-0
+
+correlated_var <- findCorrelation(corr_value, verbose=FALSE, cutoff=0.95)
+TrainSet <- TrainSet[, -c(correlated_var)]
+dim(TrainSet)
+
+```
+Now we have 49 variables for model prediction.
+
+## Modeling training dataset
+We use Random Forest algorithm to model TrainSet dataset
+```{r}
+library(randomForest)
+fit_rf <- train(classe ~., data=TrainSet, method="rf", trControl = trainControl(method = "cv", number = 4), importance = TRUE)
+fit_rf
+
+```
+
+## Cross validation with TestSet dataset 
+```{r}
+pre_rm <- predict(fit_rf, newdata=TestSet)
+ConfMat <-confusionMatrix(pre_rm, TestSet$classe)
+ConfMat
+```
+
+The Confusion Matrix has accuracy of 99.42%.
+
+## Check Out-of-Sample Error
+Here, we check out-of-sample error based on model accuracy.
+```{r}
+outErr <- 100-99.42
+outErr
+```
+Out-of-Sample Error is 0.58%.
+
+## Evaluate Importance of Variables.
+```{r}
+Imp <- varImp(fit_rf, scale=FALSE)
+varImpPlot(fit_rf$finalModel, sort=TRUE, scale=TRUE)
+```
+
+## Predict Results in Real Test Dataset
+```{r}
+
+final_test <- predict(fit_rf, testing_fill)
+final_test
+
+```
